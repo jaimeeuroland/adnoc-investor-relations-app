@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { TrendingUp } from 'lucide-react-native';
+import Svg, { Polyline } from 'react-native-svg';
 
 interface Stock {
   symbol: string;
@@ -16,6 +16,34 @@ interface StockCardProps {
 }
 
 export function StockCard({ stock }: StockCardProps) {
+  const [chartWidth, setChartWidth] = useState<number>(0);
+  const chartHeight = 30;
+
+  // Generate a pseudo intraday random-walk series per symbol for visual consistency
+  const data = useMemo(() => {
+    const length = 28;
+    let last = 50;
+    const points: number[] = [];
+    for (let i = 0; i < length; i++) {
+      const delta = (Math.random() * 14) - 7;
+      last = Math.max(5, Math.min(95, last + delta));
+      points.push(last);
+    }
+    return points;
+  }, [stock.symbol]);
+
+  const polylinePoints = useMemo(() => {
+    if (!chartWidth || data.length === 0) return '';
+    const stepX = chartWidth / (data.length - 1);
+    return data
+      .map((value, index) => {
+        const x = index * stepX;
+        const y = (1 - value / 100) * chartHeight;
+        return `${x},${y}`;
+      })
+      .join(' ');
+  }, [chartWidth, data]);
+
   return (
     <View style={styles.card}>
       <Text style={styles.symbol}>{stock.symbol}</Text>
@@ -28,22 +56,16 @@ export function StockCard({ stock }: StockCardProps) {
           {stock.changePercent}
         </Text>
       </View>
-      <View style={styles.chartContainer}>
-        <View style={styles.miniChart}>
-          {[...Array(20)].map((_, i) => (
-            <View
-              key={i}
-              style={[
-                styles.chartBar,
-                {
-                  height: Math.random() * 20 + 5,
-                  backgroundColor: stock.isPositive ? '#10b981' : '#ef4444',
-                  opacity: 0.3 + Math.random() * 0.7,
-                }
-              ]}
-            />
-          ))}
-        </View>
+      <View style={styles.chartContainer} onLayout={(e) => setChartWidth(e.nativeEvent.layout.width)}>
+        <Svg width="100%" height="100%">
+          <Polyline
+            points={polylinePoints}
+            fill="none"
+            stroke={stock.isPositive ? '#10b981' : '#ef4444'}
+            strokeWidth={2}
+            strokeOpacity={0.9}
+          />
+        </Svg>
       </View>
     </View>
   );
@@ -95,15 +117,5 @@ const styles = StyleSheet.create({
   },
   chartContainer: {
     height: 30,
-  },
-  miniChart: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    height: '100%',
-    gap: 1,
-  },
-  chartBar: {
-    flex: 1,
-    borderRadius: 1,
   },
 });
