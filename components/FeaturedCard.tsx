@@ -1,18 +1,20 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ImageBackground } from 'react-native';
+import { useRouter } from 'expo-router';
 
 export function FeaturedCard() {
+  const router = useRouter();
   return (
     <View style={styles.container}>
-      <TouchableOpacity style={styles.card}>
+      <TouchableOpacity style={styles.card} onPress={() => router.push('/sustainability')}>
         <ImageBackground
-          source={{ uri: 'https://images.unsplash.com/photo-1473341304170-971dccb5ac1e?w=400&h=200&fit=crop' }}
+          source={{ uri: 'https://img001.prntscr.com/file/img001/uBDbBt1jSsioGc6Qnvq-Mw.png' }}
           style={styles.backgroundImage}
           imageStyle={styles.imageStyle}
         >
           <View style={styles.overlay} />
           <View style={styles.content}>
-            <Text style={styles.title}>2030 Sustainability</Text>
+            <Text style={styles.title}>2040 Sustainability</Text>
             <Text style={styles.subtitle}>Strategy</Text>
           </View>
         </ImageBackground>
