@@ -73,15 +73,15 @@ export function LatestNews() {
         {newsData.map((item) => (
           <TouchableOpacity key={item.id} style={styles.newsItem}>
             <View style={styles.newsContent}>
-              <View style={[styles.categoryBadge, { backgroundColor: item.categoryColor, alignSelf: 'flex-start', marginBottom: 8 }]}>
-                <Text style={styles.categoryText}>{item.category}</Text>
-              </View>
               <Text style={styles.newsTitle} numberOfLines={2}>
                 {item.title}
               </Text>
               
               <View style={styles.newsFooter}>
                 <Text style={styles.newsDate}>{item.date}</Text>
+                <View style={[styles.categoryBadge, { backgroundColor: item.categoryColor }]}>
+                  <Text style={styles.categoryText}>{item.category}</Text>
+                </View>
               </View>
             </View>
             

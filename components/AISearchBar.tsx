@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { 
   View, 
   Text, 
@@ -7,14 +7,9 @@ import {
   Modal, 
   TextInput, 
   ScrollView, 
-  ActivityIndicator,
-  Animated,
-  Easing
+  ActivityIndicator
 } from 'react-native';
 import { Search, Sparkles, X, Send } from 'lucide-react-native';
-import { StockCard } from './StockCard';
-import { heatmapStockData } from '../constants/stockData';
-import { LinearGradient } from 'expo-linear-gradient';
 
 interface SearchResult {
   answer: string;
@@ -32,32 +27,6 @@ export function AISearchBar() {
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<ErrorState>({ message: '', visible: false });
-
-  // Animations: pulsing glow for entry search bar and header icon
-  const glow = useRef(new Animated.Value(0)).current;
-  const sendPress = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(glow, { toValue: 1, duration: 1400, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-        Animated.timing(glow, { toValue: 0, duration: 1400, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-      ])
-    ).start();
-  }, [glow]);
-
-  const glowScale = glow.interpolate({ inputRange: [0, 1], outputRange: [1, 1.01] });
-  const glowOpacity = glow.interpolate({ inputRange: [0, 1], outputRange: [0.15, 0.35] });
-
-  const handleSendPressIn = () => {
-    Animated.timing(sendPress, { toValue: 1, duration: 100, easing: Easing.out(Easing.quad), useNativeDriver: true }).start();
-  };
-
-  const handleSendPressOut = () => {
-    Animated.timing(sendPress, { toValue: 0, duration: 100, easing: Easing.out(Easing.quad), useNativeDriver: true }).start();
-  };
-
-  const sendScale = sendPress.interpolate({ inputRange: [0, 1], outputRange: [1, 0.96] });
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
@@ -116,20 +85,16 @@ export function AISearchBar() {
   return (
     <>
       <View style={styles.container}>
-        <Animated.View style={[{ transform: [{ scale: glowScale }] }]}> 
-          <LinearGradient colors={["#2563eb", "#7c3aed"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.searchBarGradient}>
-            <View style={styles.searchBarInner}>
-              <View style={styles.iconContainer}>
-                <Animated.View style={{ opacity: glowOpacity }}>
-                  <Sparkles color="#2563eb" size={20} />
-                </Animated.View>
-              </View>
-              <Text style={styles.searchText}>Get insights faster with AI powered search</Text>
-              <Search color="#6b7280" size={20} />
-            </View>
-            <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setModalVisible(true)} />
-          </LinearGradient>
-        </Animated.View>
+        <TouchableOpacity 
+          style={styles.searchBar}
+          onPress={() => setModalVisible(true)}
+        >
+          <View style={styles.iconContainer}>
+            <Sparkles color="#2563eb" size={20} />
+          </View>
+          <Text style={styles.searchText}>Get insights faster with AI powered search</Text>
+          <Search color="#6b7280" size={20} />
+        </TouchableOpacity>
       </View>
 
       <Modal
@@ -141,47 +106,15 @@ export function AISearchBar() {
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <View style={styles.headerLeft}>
-              <Animated.View style={[styles.modalIconContainer, { transform: [{ scale: glowScale }], shadowOpacity: 0.35 }] }>
+              <View style={styles.modalIconContainer}>
                 <Sparkles color="#2563eb" size={24} />
-              </Animated.View>
+              </View>
               <Text style={styles.modalTitle}>AI Search</Text>
             </View>
             <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
               <X color="#6b7280" size={24} />
             </TouchableOpacity>
           </View>
-
-          {/* Ticker Cards */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.tickerList}
-          >
-            {(() => {
-              const desiredOrder = ['ADNOCGAS', 'ADNOCLS', 'ADNOCDRILL', 'ADNOCDIST', 'FERTIGLOBE', 'BOROUGE'];
-              const mapBySymbol = new Map(heatmapStockData.map((s) => [s.symbol, s] as const));
-              return desiredOrder
-                .map((symbol) => mapBySymbol.get(symbol))
-                .filter(Boolean)
-                .map((s) => {
-                  const perf = s!.performance['1D'];
-                  return (
-                    <View key={s!.symbol} style={styles.tickerItem}>
-                      <StockCard
-                        stock={{
-                          symbol: s!.symbol,
-                          price: s!.price,
-                          currency: s!.currency,
-                          change: perf.change,
-                          changePercent: perf.changePercent,
-                          isPositive: perf.isPositive,
-                        }}
-                      />
-                    </View>
-                  );
-                });
-            })()}
-          </ScrollView>
 
           <View style={styles.searchInputContainer}>
             <TextInput
@@ -193,21 +126,17 @@ export function AISearchBar() {
               maxLength={500}
               autoFocus
             />
-            <Animated.View style={{ transform: [{ scale: sendScale }] }}>
-              <TouchableOpacity 
-                style={[styles.sendButton, !searchQuery.trim() && styles.sendButtonDisabled]}
-                onPress={handleSearch}
-                onPressIn={handleSendPressIn}
-                onPressOut={handleSendPressOut}
-                disabled={!searchQuery.trim() || isLoading}
-              >
-                {isLoading ? (
-                  <ActivityIndicator color="white" size="small" />
-                ) : (
-                  <Send color="white" size={20} />
-                )}
-              </TouchableOpacity>
-            </Animated.View>
+            <TouchableOpacity 
+              style={[styles.sendButton, !searchQuery.trim() && styles.sendButtonDisabled]}
+              onPress={handleSearch}
+              disabled={!searchQuery.trim() || isLoading}
+            >
+              {isLoading ? (
+                <ActivityIndicator color="white" size="small" />
+              ) : (
+                <Send color="white" size={20} />
+              )}
+            </TouchableOpacity>
           </View>
 
           <ScrollView style={styles.resultsContainer} showsVerticalScrollIndicator={false}>
@@ -281,22 +210,6 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
-  searchBarGradient: {
-    borderRadius: 26,
-    padding: 2,
-  },
-  searchBarInner: {
-    backgroundColor: 'white',
-    borderRadius: 24,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    shadowColor: '#2563eb',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-  },
   iconContainer: {
     width: 32,
     height: 32,
@@ -326,15 +239,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
   },
-  tickerList: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 0,
-    gap: 12,
-  },
-  tickerItem: {
-    marginRight: 12,
-  },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -360,7 +264,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingVertical: 16,
     backgroundColor: 'white',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',

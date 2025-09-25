@@ -6,16 +6,12 @@ import {
   ScrollView,
   SafeAreaView,
   TouchableOpacity,
-  ActivityIndicator,
-
-  Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Calendar, Clock, Filter, ExternalLink } from 'lucide-react-native';
-import { useQuery } from '@tanstack/react-query';
+import { ArrowLeft, Calendar, Clock, Filter } from 'lucide-react-native';
 
 interface NewsItem {
-  id: string;
+  id: number;
   title: string;
   summary: string;
   date: string;
@@ -23,197 +19,70 @@ interface NewsItem {
   category: string;
   company: 'ADNOC Distribution' | 'ADNOC Gas' | 'ADNOC Drilling' | 'ADNOC Group';
   companyColor: string;
-  link: string;
-  source: string;
 }
 
-interface SerpNewsItem {
-  position: number;
-  title: string;
-  link: string;
-  snippet: string;
-  date: string;
-  source: string;
-  thumbnail?: string;
-}
-
-interface SerpApiResponse {
-  news_results: SerpNewsItem[];
-}
-
-const companyColors = {
-  'ADNOC Distribution': '#10b981',
-  'ADNOC Gas': '#3b82f6',
-  'ADNOC Drilling': '#f59e0b',
-  'ADNOC Group': '#8b5cf6',
-};
-
-const categorizeNews = (title: string, snippet: string): string => {
-  const content = (title + ' ' + snippet).toLowerCase();
-  
-  if (content.includes('financial') || content.includes('revenue') || content.includes('earnings') || content.includes('profit') || content.includes('quarter')) {
-    return 'Financial';
-  }
-  if (content.includes('sustainability') || content.includes('green') || content.includes('carbon') || content.includes('environment')) {
-    return 'Sustainability';
-  }
-  if (content.includes('drilling') || content.includes('operations') || content.includes('production') || content.includes('facility')) {
-    return 'Operations';
-  }
-  if (content.includes('digital') || content.includes('technology') || content.includes('tech') || content.includes('innovation')) {
-    return 'Technology';
-  }
-  if (content.includes('expansion') || content.includes('new') || content.includes('opens') || content.includes('launch')) {
-    return 'Expansion';
-  }
-  if (content.includes('agreement') || content.includes('contract') || content.includes('partnership') || content.includes('deal')) {
-    return 'Commercial';
-  }
-  return 'General';
-};
-
-const identifyCompany = (title: string, snippet: string): 'ADNOC Distribution' | 'ADNOC Gas' | 'ADNOC Drilling' | 'ADNOC Group' => {
-  const content = (title + ' ' + snippet).toLowerCase();
-  
-  if (content.includes('distribution') || content.includes('retail') || content.includes('service station')) {
-    return 'ADNOC Distribution';
-  }
-  if (content.includes('gas') || content.includes('lng') || content.includes('ammonia')) {
-    return 'ADNOC Gas';
-  }
-  if (content.includes('drilling') || content.includes('rig')) {
-    return 'ADNOC Drilling';
-  }
-  return 'ADNOC Group';
-};
-
-// Mock data for fallback when API fails
-const mockNewsData: NewsItem[] = [
+const newsData: NewsItem[] = [
   {
-    id: '1',
-    title: 'ADNOC Announces Record Q3 2024 Financial Results',
-    summary: 'ADNOC Group reports strong financial performance with increased revenue and operational efficiency across all business segments.',
-    date: '2024-11-15',
+    id: 1,
+    title: 'ADNOC Distribution Reports Strong Q4 2024 Performance',
+    summary: 'Record fuel sales and retail expansion drive exceptional quarterly results.',
+    date: '2024-12-15',
     time: '09:30',
     category: 'Financial',
-    company: 'ADNOC Group',
-    companyColor: companyColors['ADNOC Group'],
-    link: 'https://adnoc.ae/news-and-media',
-    source: 'ADNOC Official',
-  },
-  {
-    id: '2',
-    title: 'ADNOC Distribution Expands Retail Network with 50 New Service Stations',
-    summary: 'Strategic expansion continues as ADNOC Distribution opens new locations across the UAE, enhancing customer convenience and market presence.',
-    date: '2024-11-14',
-    time: '14:15',
-    category: 'Expansion',
     company: 'ADNOC Distribution',
-    companyColor: companyColors['ADNOC Distribution'],
-    link: 'https://adnocdistribution.ae/news',
-    source: 'Gulf News',
+    companyColor: '#10b981',
   },
   {
-    id: '3',
-    title: 'ADNOC Gas Secures Major LNG Supply Agreement',
-    summary: 'Long-term partnership established to supply liquefied natural gas to international markets, strengthening global energy security.',
-    date: '2024-11-13',
-    time: '11:45',
-    category: 'Commercial',
+    id: 2,
+    title: 'ADNOC Gas Advances Blue Ammonia Production',
+    summary: 'New facility to produce low-carbon ammonia for global export markets.',
+    date: '2024-12-14',
+    time: '14:15',
+    category: 'Sustainability',
     company: 'ADNOC Gas',
-    companyColor: companyColors['ADNOC Gas'],
-    link: 'https://adnoc.ae/gas-news',
-    source: 'Energy Intelligence',
+    companyColor: '#3b82f6',
   },
   {
-    id: '4',
-    title: 'ADNOC Drilling Deploys Advanced AI Technology for Enhanced Operations',
-    summary: 'Implementation of cutting-edge artificial intelligence systems to optimize drilling efficiency and reduce environmental impact.',
-    date: '2024-11-12',
+    id: 3,
+    title: 'ADNOC Drilling Expands Fleet with Advanced Rigs',
+    summary: 'Investment in cutting-edge drilling technology to enhance operational efficiency.',
+    date: '2024-12-12',
+    time: '11:45',
+    category: 'Operations',
+    company: 'ADNOC Drilling',
+    companyColor: '#f59e0b',
+  },
+  {
+    id: 4,
+    title: 'ADNOC Group Launches Digital Transformation Initiative',
+    summary: 'Comprehensive digitalization program across all business units.',
+    date: '2024-12-10',
     time: '16:20',
     category: 'Technology',
-    company: 'ADNOC Drilling',
-    companyColor: companyColors['ADNOC Drilling'],
-    link: 'https://adnocdrilling.ae/technology',
-    source: 'Oil & Gas Journal',
-  },
-  {
-    id: '5',
-    title: 'ADNOC Group Commits to Net Zero Carbon Emissions by 2050',
-    summary: 'Comprehensive sustainability strategy unveiled with significant investments in renewable energy and carbon capture technologies.',
-    date: '2024-11-11',
-    time: '10:00',
-    category: 'Sustainability',
     company: 'ADNOC Group',
-    companyColor: companyColors['ADNOC Group'],
-    link: 'https://adnoc.ae/sustainability',
-    source: 'Reuters',
+    companyColor: '#8b5cf6',
   },
   {
-    id: '6',
-    title: 'ADNOC Distribution Reports Strong Q3 Performance',
-    summary: 'Retail fuel sales increase by 12% year-over-year, driven by network expansion and improved customer services.',
-    date: '2024-11-10',
-    time: '13:30',
-    category: 'Financial',
+    id: 5,
+    title: 'ADNOC Distribution Opens 50 New Service Stations',
+    summary: 'Strategic expansion continues with new locations across the UAE.',
+    date: '2024-12-08',
+    time: '10:15',
+    category: 'Expansion',
     company: 'ADNOC Distribution',
-    companyColor: companyColors['ADNOC Distribution'],
-    link: 'https://adnocdistribution.ae/investor-relations',
-    source: 'Bloomberg',
+    companyColor: '#10b981',
+  },
+  {
+    id: 6,
+    title: 'ADNOC Gas Signs Major LNG Supply Agreement',
+    summary: 'Long-term contract secured with Asian energy partners.',
+    date: '2024-12-05',
+    time: '13:30',
+    category: 'Commercial',
+    company: 'ADNOC Gas',
+    companyColor: '#3b82f6',
   },
 ];
-
-const fetchNews = async (): Promise<NewsItem[]> => {
-  try {
-    console.log('Attempting to fetch news from SerpAPI...');
-    
-    // Try to fetch from SerpAPI
-    const response = await fetch('https://serpapi.com/search?engine=google_news&q=ADNOC&hl=en&gl=ae&api_key=c13fc79320d8a768980df46c5e3260a662baa4652adccf6acd07e7b67182033c', {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-      },
-    });
-    
-    if (!response.ok) {
-      console.log('SerpAPI request failed with status:', response.status);
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    
-    const data: SerpApiResponse = await response.json();
-    console.log('SerpAPI response received:', data);
-    
-    if (!data.news_results || data.news_results.length === 0) {
-      console.log('No news results from SerpAPI, using mock data');
-      return mockNewsData;
-    }
-    
-    return data.news_results.map((item: SerpNewsItem) => {
-      const company = identifyCompany(item.title, item.snippet);
-      const category = categorizeNews(item.title, item.snippet);
-      const newsDate = new Date(item.date);
-      
-      return {
-        id: item.position.toString(),
-        title: item.title,
-        summary: item.snippet,
-        date: newsDate.toISOString().split('T')[0],
-        time: newsDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-        category,
-        company,
-        companyColor: companyColors[company],
-        link: item.link,
-        source: item.source,
-      };
-    });
-  } catch (error) {
-    console.error('Error fetching news from SerpAPI:', error);
-    console.log('Falling back to mock data due to API error');
-    
-    // Return mock data as fallback
-    return mockNewsData;
-  }
-};
 
 type FilterOption = 'All News' | 'ADNOC Distribution' | 'ADNOC Gas' | 'ADNOC Drilling' | 'ADNOC Group';
 
@@ -228,39 +97,12 @@ const filterOptions: FilterOption[] = [
 export default function NewsScreen() {
   const [selectedFilter, setSelectedFilter] = useState<FilterOption>('All News');
 
-  const { data: newsData = [], isLoading, error, refetch } = useQuery({
-    queryKey: ['adnoc-news'],
-    queryFn: fetchNews,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    refetchInterval: 10 * 60 * 1000, // 10 minutes
-  });
-
   const filteredNews = useMemo(() => {
     if (selectedFilter === 'All News') {
       return newsData;
     }
     return newsData.filter(news => news.company === selectedFilter);
-  }, [newsData, selectedFilter]);
-
-  const handleReadMore = async (link: string) => {
-    if (!link || !link.trim() || link.length > 2000) {
-      console.log('Invalid URL provided');
-      return;
-    }
-    
-    const sanitizedLink = link.trim();
-    
-    try {
-      const supported = await Linking.canOpenURL(sanitizedLink);
-      if (supported) {
-        await Linking.openURL(sanitizedLink);
-      } else {
-        console.log('Cannot open URL:', sanitizedLink);
-      }
-    } catch (error) {
-      console.error('Error opening link:', error);
-    }
-  };
+  }, [selectedFilter]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -293,11 +135,7 @@ export default function NewsScreen() {
                 styles.filterButton,
                 selectedFilter === option && styles.filterButtonActive
               ]}
-              onPress={() => {
-                if (option && option.trim()) {
-                  setSelectedFilter(option);
-                }
-              }}
+              onPress={() => setSelectedFilter(option)}
             >
               <Text style={[
                 styles.filterButtonText,
@@ -310,26 +148,9 @@ export default function NewsScreen() {
         </ScrollView>
       </View>
 
-      <ScrollView 
-        style={styles.content} 
-        showsVerticalScrollIndicator={false}
-
-      >
-        {isLoading && newsData.length === 0 ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#2563eb" />
-            <Text style={styles.loadingText}>Loading latest news...</Text>
-          </View>
-        ) : error ? (
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>Failed to load news</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          filteredNews.map((news) => (
-            <TouchableOpacity key={news.id} style={styles.newsCard} onPress={() => handleReadMore(news.link)}>
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {filteredNews.map((news) => (
+          <TouchableOpacity key={news.id} style={styles.newsCard}>
             <View style={styles.newsHeader}>
               <View style={styles.badgeContainer}>
                 <View style={styles.categoryBadge}>
@@ -354,16 +175,12 @@ export default function NewsScreen() {
             <Text style={styles.newsTitle}>{news.title}</Text>
             <Text style={styles.newsSummary}>{news.summary}</Text>
             
-            <View style={styles.newsFooter}>
-              <Text style={styles.sourceText}>Source: {news.source}</Text>
-              <View style={styles.readMoreButton}>
-                <Text style={styles.readMoreText}>Read More</Text>
-                <ExternalLink color="#2563eb" size={16} />
-              </View>
-            </View>
+            <TouchableOpacity style={styles.readMoreButton}>
+              <Text style={styles.readMoreText}>Read More</Text>
+              <ArrowLeft color="#2563eb" size={16} style={{ transform: [{ rotate: '180deg' }] }} />
+            </TouchableOpacity>
           </TouchableOpacity>
-          ))
-        )}
+        ))}
         
         {filteredNews.length === 0 && (
           <View style={styles.emptyState}>
@@ -546,50 +363,5 @@ const styles = StyleSheet.create({
   },
   bottomSpacing: {
     height: 20,
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
-    gap: 16,
-  },
-  loadingText: {
-    fontSize: 16,
-    color: '#6b7280',
-    textAlign: 'center',
-  },
-  errorContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
-    gap: 16,
-  },
-  errorText: {
-    fontSize: 16,
-    color: '#dc2626',
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  retryButton: {
-    backgroundColor: '#2563eb',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  newsFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  sourceText: {
-    fontSize: 12,
-    color: '#9ca3af',
-    fontStyle: 'italic',
   },
 });
