@@ -28,6 +28,8 @@ interface RecordingState {
   isRecording: boolean;
   isProcessing: boolean;
   recording: Audio.Recording | null;
+  isAutoListening: boolean;
+  silenceTimer: NodeJS.Timeout | null;
 }
 
 export function AISearchBar() {
@@ -39,11 +41,13 @@ export function AISearchBar() {
   const [recordingState, setRecordingState] = useState<RecordingState>({
     isRecording: false,
     isProcessing: false,
-    recording: null
+    recording: null,
+    isAutoListening: false,
+    silenceTimer: null
   });
 
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) {
+  const handleSearchWithQuery = async (query: string) => {
+    if (!query.trim()) {
       setError({ message: 'Please enter a search query', visible: true });
       return;
     }
@@ -60,7 +64,7 @@ export function AISearchBar() {
         },
         body: JSON.stringify({
           company_code: 'S-NDA',
-          question: searchQuery,
+          question: query,
           response_model: '2',
           semantic_count: 3,
           request_source: 'ADNOC Investor Relations App',
@@ -79,7 +83,7 @@ export function AISearchBar() {
       
       setSearchResult({
         answer: data.answer || data.response || 'No answer available',
-        question: searchQuery
+        question: query
       });
     } catch (error) {
       console.error('Search error:', error);
@@ -89,15 +93,22 @@ export function AISearchBar() {
     }
   };
 
+  const handleSearch = async () => {
+    await handleSearchWithQuery(searchQuery);
+  };
+
   const handleClose = () => {
     if (recordingState.recording) {
       stopRecording();
+    }
+    if (recordingState.silenceTimer) {
+      clearTimeout(recordingState.silenceTimer);
     }
     setModalVisible(false);
     setSearchQuery('');
     setSearchResult(null);
     setError({ message: '', visible: false });
-    setRecordingState({ isRecording: false, isProcessing: false, recording: null });
+    setRecordingState({ isRecording: false, isProcessing: false, recording: null, isAutoListening: false, silenceTimer: null });
   };
 
   const requestPermissions = async (): Promise<boolean> => {
@@ -145,24 +156,76 @@ export function AISearchBar() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
       const audioChunks: Blob[] = [];
+      let audioContext: AudioContext | null = null;
+      let analyser: AnalyserNode | null = null;
+      let dataArray: Uint8Array | null = null;
+      let silenceStart: number | null = null;
+      const SILENCE_THRESHOLD = 30; // Adjust this value to control sensitivity
+      const SILENCE_DURATION = 2000; // 2 seconds of silence before auto-stop
+
+      // Set up audio analysis for silence detection
+      try {
+        audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const source = audioContext.createMediaStreamSource(stream);
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        dataArray = new Uint8Array(analyser.frequencyBinCount);
+      } catch (audioError) {
+        console.warn('Audio analysis setup failed, continuing without silence detection:', audioError);
+      }
+
+      const checkAudioLevel = () => {
+        if (!analyser || !dataArray) return;
+        
+        analyser.getByteFrequencyData(dataArray);
+        const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
+        
+        if (average < SILENCE_THRESHOLD) {
+          if (silenceStart === null) {
+            silenceStart = Date.now();
+          } else if (Date.now() - silenceStart > SILENCE_DURATION) {
+            console.log('Silence detected, stopping recording automatically');
+            stopRecording();
+            return;
+          }
+        } else {
+          silenceStart = null;
+        }
+        
+        if (recordingState.isRecording) {
+          requestAnimationFrame(checkAudioLevel);
+        }
+      };
 
       mediaRecorder.ondataavailable = (event) => {
         audioChunks.push(event.data);
       };
 
       mediaRecorder.onstop = async () => {
+        if (audioContext) {
+          audioContext.close();
+        }
         const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-        await transcribeWebAudio(audioBlob);
+        await transcribeWebAudio(audioBlob, recordingState.isAutoListening);
         stream.getTracks().forEach(track => track.stop());
-        setRecordingState({ isRecording: false, isProcessing: false, recording: null });
+        setRecordingState(prev => ({ ...prev, isRecording: false, isProcessing: false, recording: null, silenceTimer: null }));
       };
 
       mediaRecorder.start();
       setRecordingState({ 
         isRecording: true, 
         isProcessing: false, 
-        recording: { mediaRecorder, stream } as any 
+        recording: { mediaRecorder, stream } as any,
+        isAutoListening: false,
+        silenceTimer: null
       });
+      
+      // Start silence detection if this is auto-listening
+      if (analyser && dataArray && recordingState.isAutoListening) {
+        requestAnimationFrame(checkAudioLevel);
+      }
+      
       console.log('Web recording started');
     } catch (error) {
       console.error('Web recording failed:', error);
@@ -203,7 +266,23 @@ export function AISearchBar() {
         },
       });
 
-      setRecordingState({ isRecording: true, isProcessing: false, recording });
+      let autoStopTimer: NodeJS.Timeout | null = null;
+      
+      // Set up auto-stop timer for mobile if this is auto-listening
+      if (recordingState.isAutoListening) {
+        autoStopTimer = setTimeout(() => {
+          console.log('Auto-stopping recording after 10 seconds');
+          stopRecording();
+        }, 10000); // Auto-stop after 10 seconds
+      }
+
+      setRecordingState({ 
+        isRecording: true, 
+        isProcessing: false, 
+        recording,
+        isAutoListening: false,
+        silenceTimer: autoStopTimer
+      });
       console.log('Mobile recording started');
     } catch (error) {
       console.error('Mobile recording failed:', error);
@@ -215,7 +294,12 @@ export function AISearchBar() {
     try {
       if (!recordingState.recording) return;
 
-      setRecordingState(prev => ({ ...prev, isRecording: false, isProcessing: true }));
+      // Clear any auto-stop timers
+      if (recordingState.silenceTimer) {
+        clearTimeout(recordingState.silenceTimer);
+      }
+
+      setRecordingState(prev => ({ ...prev, isRecording: false, isProcessing: true, silenceTimer: null }));
       
       if (Platform.OS === 'web') {
         // Web implementation
@@ -232,18 +316,18 @@ export function AISearchBar() {
         console.log('Recording stopped, URI:', uri);
 
         if (uri) {
-          await transcribeMobileAudio(uri);
+          await transcribeMobileAudio(uri, recordingState.isAutoListening);
         }
-        setRecordingState({ isRecording: false, isProcessing: false, recording: null });
+        setRecordingState({ isRecording: false, isProcessing: false, recording: null, isAutoListening: false, silenceTimer: null });
       }
     } catch (error) {
       console.error('Failed to stop recording:', error);
       setError({ message: 'Failed to process recording. Please try again.', visible: true });
-      setRecordingState({ isRecording: false, isProcessing: false, recording: null });
+      setRecordingState({ isRecording: false, isProcessing: false, recording: null, isAutoListening: false, silenceTimer: null });
     }
   };
 
-  const transcribeWebAudio = async (audioBlob: Blob) => {
+  const transcribeWebAudio = async (audioBlob: Blob, autoSubmit: boolean = false) => {
     try {
       const formData = new FormData();
       formData.append('audio', audioBlob, 'recording.wav');
@@ -260,10 +344,17 @@ export function AISearchBar() {
       const data = await response.json();
       console.log('Web transcription result:', data);
       
-      if (data.text) {
+      if (data.text && data.text.trim()) {
         setSearchQuery(data.text);
+        
+        // Auto-submit the query if this was an auto-listening session
+        if (autoSubmit) {
+          setTimeout(() => {
+            handleSearchWithQuery(data.text);
+          }, 500); // Small delay to ensure UI updates
+        }
       } else {
-        setError({ message: 'Could not transcribe audio. Please try again.', visible: true });
+        setError({ message: 'Could not transcribe audio. Please try speaking more clearly.', visible: true });
       }
     } catch (error) {
       console.error('Web transcription failed:', error);
@@ -271,7 +362,7 @@ export function AISearchBar() {
     }
   };
 
-  const transcribeMobileAudio = async (uri: string) => {
+  const transcribeMobileAudio = async (uri: string, autoSubmit: boolean = false) => {
     if (!uri.trim()) {
       setError({ message: 'Invalid audio file. Please try again.', visible: true });
       return;
@@ -301,10 +392,17 @@ export function AISearchBar() {
       const data = await response.json();
       console.log('Mobile transcription result:', data);
       
-      if (data.text) {
+      if (data.text && data.text.trim()) {
         setSearchQuery(data.text);
+        
+        // Auto-submit the query if this was an auto-listening session
+        if (autoSubmit) {
+          setTimeout(() => {
+            handleSearchWithQuery(data.text);
+          }, 500); // Small delay to ensure UI updates
+        }
       } else {
-        setError({ message: 'Could not transcribe audio. Please try again.', visible: true });
+        setError({ message: 'Could not transcribe audio. Please try speaking more clearly.', visible: true });
       }
     } catch (error) {
       console.error('Mobile transcription failed:', error);
@@ -317,6 +415,30 @@ export function AISearchBar() {
       stopRecording();
     } else {
       startRecording();
+    }
+  };
+
+  const startAutoListening = async () => {
+    try {
+      const hasPermission = await requestPermissions();
+      if (!hasPermission) return;
+
+      // Clear any existing state
+      setSearchQuery('');
+      setSearchResult(null);
+      setError({ message: '', visible: false });
+
+      // Set auto-listening mode
+      setRecordingState(prev => ({ ...prev, isAutoListening: true }));
+
+      if (Platform.OS === 'web') {
+        await startWebRecording();
+      } else {
+        await startMobileRecording();
+      }
+    } catch (error) {
+      console.error('Failed to start auto-listening:', error);
+      setError({ message: 'Failed to start voice input. Please try again.', visible: true });
     }
   };
 
@@ -335,8 +457,11 @@ export function AISearchBar() {
           recordingState.recording.stopAndUnloadAsync();
         }
       }
+      if (recordingState.silenceTimer) {
+        clearTimeout(recordingState.silenceTimer);
+      }
     };
-  }, [recordingState.recording]);
+  }, [recordingState.recording, recordingState.silenceTimer]);
 
   return (
     <>
@@ -402,6 +527,16 @@ export function AISearchBar() {
                 )}
               </TouchableOpacity>
               <TouchableOpacity 
+                style={[
+                  styles.autoListenButton,
+                  recordingState.isAutoListening && styles.autoListenButtonActive
+                ]}
+                onPress={startAutoListening}
+                disabled={recordingState.isRecording || recordingState.isProcessing || isLoading}
+              >
+                <Sparkles color="white" size={20} />
+              </TouchableOpacity>
+              <TouchableOpacity 
                 style={[styles.sendButton, !searchQuery.trim() && styles.sendButtonDisabled]}
                 onPress={handleSearch}
                 disabled={!searchQuery.trim() || isLoading || recordingState.isRecording || recordingState.isProcessing}
@@ -416,7 +551,12 @@ export function AISearchBar() {
             {recordingState.isRecording && (
               <View style={styles.recordingIndicator}>
                 <View style={styles.recordingDot} />
-                <Text style={styles.recordingText}>Recording... Tap mic to stop</Text>
+                <Text style={styles.recordingText}>
+                  {recordingState.isAutoListening 
+                    ? 'Listening... Speak now (auto-stop enabled)' 
+                    : 'Recording... Tap mic to stop'
+                  }
+                </Text>
               </View>
             )}
             {recordingState.isProcessing && (
@@ -468,6 +608,12 @@ export function AISearchBar() {
                 <Text style={styles.emptyStateText}>
                   Get instant insights about ADNOC&apos;s financial performance, strategic priorities, and investor relations.
                 </Text>
+                <View style={styles.instructionsContainer}>
+                  <Text style={styles.instructionsTitle}>Voice Features:</Text>
+                  <Text style={styles.instructionsText}>• Tap the microphone for manual recording</Text>
+                  <Text style={styles.instructionsText}>• Tap the sparkle icon for automatic voice-to-search</Text>
+                  <Text style={styles.instructionsText}>• Auto-search listens, transcribes, and searches automatically</Text>
+                </View>
               </View>
             )}
           </ScrollView>
@@ -587,6 +733,19 @@ const styles = StyleSheet.create({
   voiceButtonProcessing: {
     backgroundColor: '#6b7280',
   },
+  autoListenButton: {
+    backgroundColor: '#7c3aed',
+    borderRadius: 12,
+    padding: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: 48,
+    minHeight: 48,
+    marginRight: 8,
+  },
+  autoListenButtonActive: {
+    backgroundColor: '#5b21b6',
+  },
   sendButton: {
     backgroundColor: '#2563eb',
     borderRadius: 12,
@@ -661,7 +820,7 @@ const styles = StyleSheet.create({
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 80,
+    paddingVertical: 60,
     paddingHorizontal: 40,
   },
   emptyStateTitle: {
@@ -676,6 +835,27 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     textAlign: 'center',
     lineHeight: 24,
+    marginBottom: 24,
+  },
+  instructionsContainer: {
+    backgroundColor: '#f0f9ff',
+    borderRadius: 12,
+    padding: 16,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+  },
+  instructionsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#0369a1',
+    marginBottom: 8,
+  },
+  instructionsText: {
+    fontSize: 14,
+    color: '#0369a1',
+    lineHeight: 20,
+    marginBottom: 4,
   },
   errorContainer: {
     backgroundColor: '#fef2f2',
