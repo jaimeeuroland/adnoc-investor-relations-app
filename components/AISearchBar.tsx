@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -7,9 +7,12 @@ import {
   Modal, 
   TextInput, 
   ScrollView, 
-  ActivityIndicator
+  ActivityIndicator,
+  Platform,
+  Alert
 } from 'react-native';
-import { Search, Sparkles, X, Send } from 'lucide-react-native';
+import { Search, Sparkles, X, Send, Mic, MicOff } from 'lucide-react-native';
+import { Audio } from 'expo-av';
 
 interface SearchResult {
   answer: string;
@@ -21,12 +24,23 @@ interface ErrorState {
   visible: boolean;
 }
 
+interface RecordingState {
+  isRecording: boolean;
+  isProcessing: boolean;
+  recording: Audio.Recording | null;
+}
+
 export function AISearchBar() {
   const [modalVisible, setModalVisible] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<ErrorState>({ message: '', visible: false });
+  const [recordingState, setRecordingState] = useState<RecordingState>({
+    isRecording: false,
+    isProcessing: false,
+    recording: null
+  });
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
@@ -76,11 +90,152 @@ export function AISearchBar() {
   };
 
   const handleClose = () => {
+    if (recordingState.recording) {
+      stopRecording();
+    }
     setModalVisible(false);
     setSearchQuery('');
     setSearchResult(null);
     setError({ message: '', visible: false });
+    setRecordingState({ isRecording: false, isProcessing: false, recording: null });
   };
+
+  const requestPermissions = async (): Promise<boolean> => {
+    try {
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status !== 'granted') {
+        if (Platform.OS === 'web') {
+          setError({ message: 'Please grant microphone permission to use voice search.', visible: true });
+        } else {
+          Alert.alert(
+            'Permission Required',
+            'Please grant microphone permission to use voice search.',
+            [{ text: 'OK' }]
+          );
+        }
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.error('Permission request failed:', error);
+      return false;
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const hasPermission = await requestPermissions();
+      if (!hasPermission) return;
+
+      if (Platform.OS !== 'web') {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+        });
+      }
+
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+
+      setRecordingState({ isRecording: true, isProcessing: false, recording });
+      console.log('Recording started');
+    } catch (error) {
+      console.error('Failed to start recording:', error);
+      setError({ message: 'Failed to start recording. Please try again.', visible: true });
+    }
+  };
+
+  const stopRecording = async () => {
+    try {
+      if (!recordingState.recording) return;
+
+      setRecordingState(prev => ({ ...prev, isRecording: false, isProcessing: true }));
+      
+      await recordingState.recording.stopAndUnloadAsync();
+      
+      if (Platform.OS !== 'web') {
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+      }
+
+      const uri = recordingState.recording.getURI();
+      console.log('Recording stopped, URI:', uri);
+
+      if (uri) {
+        await transcribeAudio(uri);
+      }
+
+      setRecordingState({ isRecording: false, isProcessing: false, recording: null });
+    } catch (error) {
+      console.error('Failed to stop recording:', error);
+      setError({ message: 'Failed to process recording. Please try again.', visible: true });
+      setRecordingState({ isRecording: false, isProcessing: false, recording: null });
+    }
+  };
+
+  const transcribeAudio = async (uri: string) => {
+    if (!uri.trim()) {
+      setError({ message: 'Invalid audio file. Please try again.', visible: true });
+      return;
+    }
+    try {
+      const formData = new FormData();
+      
+      if (Platform.OS === 'web') {
+        const response = await fetch(uri);
+        const blob = await response.blob();
+        formData.append('audio', blob, 'recording.wav');
+      } else {
+        const uriParts = uri.split('.');
+        const fileType = uriParts[uriParts.length - 1];
+        
+        const audioFile = {
+          uri,
+          name: `recording.${fileType}`,
+          type: `audio/${fileType}`
+        } as any;
+        
+        formData.append('audio', audioFile);
+      }
+
+      const response = await fetch('https://toolkit.rork.com/stt/transcribe/', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('Transcription result:', data);
+      
+      if (data.text) {
+        setSearchQuery(data.text);
+      } else {
+        setError({ message: 'Could not transcribe audio. Please try again.', visible: true });
+      }
+    } catch (error) {
+      console.error('Transcription failed:', error);
+      setError({ message: 'Failed to transcribe audio. Please try again.', visible: true });
+    }
+  };
+
+  const handleVoiceInput = () => {
+    if (recordingState.isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (recordingState.recording) {
+        recordingState.recording.stopAndUnloadAsync();
+      }
+    };
+  }, [recordingState.recording]);
 
   return (
     <>
@@ -117,26 +272,58 @@ export function AISearchBar() {
           </View>
 
           <View style={styles.searchInputContainer}>
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Ask anything about ADNOC investor relations..."
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              multiline
-              maxLength={500}
-              autoFocus
-            />
-            <TouchableOpacity 
-              style={[styles.sendButton, !searchQuery.trim() && styles.sendButtonDisabled]}
-              onPress={handleSearch}
-              disabled={!searchQuery.trim() || isLoading}
-            >
-              {isLoading ? (
-                <ActivityIndicator color="white" size="small" />
-              ) : (
-                <Send color="white" size={20} />
-              )}
-            </TouchableOpacity>
+            <View style={styles.inputRow}>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Ask anything about ADNOC investor relations..."
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                multiline
+                maxLength={500}
+                autoFocus
+                editable={!recordingState.isRecording && !recordingState.isProcessing}
+              />
+              <TouchableOpacity 
+                style={[
+                  styles.voiceButton, 
+                  recordingState.isRecording && styles.voiceButtonActive,
+                  recordingState.isProcessing && styles.voiceButtonProcessing
+                ]}
+                onPress={handleVoiceInput}
+                disabled={recordingState.isProcessing || isLoading}
+              >
+                {recordingState.isProcessing ? (
+                  <ActivityIndicator color="white" size="small" />
+                ) : recordingState.isRecording ? (
+                  <MicOff color="white" size={20} />
+                ) : (
+                  <Mic color="white" size={20} />
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.sendButton, !searchQuery.trim() && styles.sendButtonDisabled]}
+                onPress={handleSearch}
+                disabled={!searchQuery.trim() || isLoading || recordingState.isRecording || recordingState.isProcessing}
+              >
+                {isLoading ? (
+                  <ActivityIndicator color="white" size="small" />
+                ) : (
+                  <Send color="white" size={20} />
+                )}
+              </TouchableOpacity>
+            </View>
+            {recordingState.isRecording && (
+              <View style={styles.recordingIndicator}>
+                <View style={styles.recordingDot} />
+                <Text style={styles.recordingText}>Recording... Tap mic to stop</Text>
+              </View>
+            )}
+            {recordingState.isProcessing && (
+              <View style={styles.processingIndicator}>
+                <ActivityIndicator color="#2563eb" size="small" />
+                <Text style={styles.processingText}>Processing audio...</Text>
+              </View>
+            )}
           </View>
 
           <ScrollView style={styles.resultsContainer} showsVerticalScrollIndicator={false}>
@@ -261,13 +448,15 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   searchInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
     paddingHorizontal: 20,
     paddingVertical: 16,
     backgroundColor: 'white',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
   },
   searchInput: {
     flex: 1,
@@ -278,8 +467,24 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 16,
     maxHeight: 120,
-    marginRight: 12,
+    marginRight: 8,
     backgroundColor: '#f9fafb',
+  },
+  voiceButton: {
+    backgroundColor: '#10b981',
+    borderRadius: 12,
+    padding: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: 48,
+    minHeight: 48,
+    marginRight: 8,
+  },
+  voiceButtonActive: {
+    backgroundColor: '#dc2626',
+  },
+  voiceButtonProcessing: {
+    backgroundColor: '#6b7280',
   },
   sendButton: {
     backgroundColor: '#2563eb',
@@ -396,5 +601,45 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
     fontWeight: '600',
+  },
+  recordingIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#fef2f2',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#fecaca',
+  },
+  recordingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#dc2626',
+    marginRight: 8,
+  },
+  recordingText: {
+    fontSize: 14,
+    color: '#dc2626',
+    fontWeight: '500',
+  },
+  processingIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#eff6ff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+  },
+  processingText: {
+    fontSize: 14,
+    color: '#2563eb',
+    fontWeight: '500',
+    marginLeft: 8,
   },
 });
