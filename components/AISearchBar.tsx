@@ -127,22 +127,87 @@ export function AISearchBar() {
       const hasPermission = await requestPermissions();
       if (!hasPermission) return;
 
-      if (Platform.OS !== 'web') {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-        });
+      if (Platform.OS === 'web') {
+        // Web implementation using MediaRecorder
+        await startWebRecording();
+      } else {
+        // Mobile implementation using expo-av
+        await startMobileRecording();
       }
-
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
-
-      setRecordingState({ isRecording: true, isProcessing: false, recording });
-      console.log('Recording started');
     } catch (error) {
       console.error('Failed to start recording:', error);
       setError({ message: 'Failed to start recording. Please try again.', visible: true });
+    }
+  };
+
+  const startWebRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      const audioChunks: Blob[] = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        audioChunks.push(event.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+        await transcribeWebAudio(audioBlob);
+        stream.getTracks().forEach(track => track.stop());
+        setRecordingState({ isRecording: false, isProcessing: false, recording: null });
+      };
+
+      mediaRecorder.start();
+      setRecordingState({ 
+        isRecording: true, 
+        isProcessing: false, 
+        recording: { mediaRecorder, stream } as any 
+      });
+      console.log('Web recording started');
+    } catch (error) {
+      console.error('Web recording failed:', error);
+      throw error;
+    }
+  };
+
+  const startMobileRecording = async () => {
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const { recording } = await Audio.Recording.createAsync({
+        android: {
+          extension: '.m4a',
+          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+          audioEncoder: Audio.AndroidAudioEncoder.AAC,
+          sampleRate: 44100,
+          numberOfChannels: 2,
+          bitRate: 128000,
+        },
+        ios: {
+          extension: '.wav',
+          outputFormat: Audio.IOSOutputFormat.LINEARPCM,
+          audioQuality: Audio.IOSAudioQuality.HIGH,
+          sampleRate: 44100,
+          numberOfChannels: 2,
+          bitRate: 128000,
+          linearPCMBitDepth: 16,
+          linearPCMIsBigEndian: false,
+          linearPCMIsFloat: false,
+        },
+        web: {
+          mimeType: 'audio/webm',
+          bitsPerSecond: 128000,
+        },
+      });
+
+      setRecordingState({ isRecording: true, isProcessing: false, recording });
+      console.log('Mobile recording started');
+    } catch (error) {
+      console.error('Mobile recording failed:', error);
+      throw error;
     }
   };
 
@@ -152,20 +217,25 @@ export function AISearchBar() {
 
       setRecordingState(prev => ({ ...prev, isRecording: false, isProcessing: true }));
       
-      await recordingState.recording.stopAndUnloadAsync();
-      
-      if (Platform.OS !== 'web') {
+      if (Platform.OS === 'web') {
+        // Web implementation
+        const { mediaRecorder } = recordingState.recording as any;
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+          mediaRecorder.stop();
+        }
+      } else {
+        // Mobile implementation
+        await recordingState.recording.stopAndUnloadAsync();
         await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+
+        const uri = recordingState.recording.getURI();
+        console.log('Recording stopped, URI:', uri);
+
+        if (uri) {
+          await transcribeMobileAudio(uri);
+        }
+        setRecordingState({ isRecording: false, isProcessing: false, recording: null });
       }
-
-      const uri = recordingState.recording.getURI();
-      console.log('Recording stopped, URI:', uri);
-
-      if (uri) {
-        await transcribeAudio(uri);
-      }
-
-      setRecordingState({ isRecording: false, isProcessing: false, recording: null });
     } catch (error) {
       console.error('Failed to stop recording:', error);
       setError({ message: 'Failed to process recording. Please try again.', visible: true });
@@ -173,30 +243,10 @@ export function AISearchBar() {
     }
   };
 
-  const transcribeAudio = async (uri: string) => {
-    if (!uri.trim()) {
-      setError({ message: 'Invalid audio file. Please try again.', visible: true });
-      return;
-    }
+  const transcribeWebAudio = async (audioBlob: Blob) => {
     try {
       const formData = new FormData();
-      
-      if (Platform.OS === 'web') {
-        const response = await fetch(uri);
-        const blob = await response.blob();
-        formData.append('audio', blob, 'recording.wav');
-      } else {
-        const uriParts = uri.split('.');
-        const fileType = uriParts[uriParts.length - 1];
-        
-        const audioFile = {
-          uri,
-          name: `recording.${fileType}`,
-          type: `audio/${fileType}`
-        } as any;
-        
-        formData.append('audio', audioFile);
-      }
+      formData.append('audio', audioBlob, 'recording.wav');
 
       const response = await fetch('https://toolkit.rork.com/stt/transcribe/', {
         method: 'POST',
@@ -208,7 +258,7 @@ export function AISearchBar() {
       }
 
       const data = await response.json();
-      console.log('Transcription result:', data);
+      console.log('Web transcription result:', data);
       
       if (data.text) {
         setSearchQuery(data.text);
@@ -216,7 +266,48 @@ export function AISearchBar() {
         setError({ message: 'Could not transcribe audio. Please try again.', visible: true });
       }
     } catch (error) {
-      console.error('Transcription failed:', error);
+      console.error('Web transcription failed:', error);
+      setError({ message: 'Failed to transcribe audio. Please try again.', visible: true });
+    }
+  };
+
+  const transcribeMobileAudio = async (uri: string) => {
+    if (!uri.trim()) {
+      setError({ message: 'Invalid audio file. Please try again.', visible: true });
+      return;
+    }
+    try {
+      const formData = new FormData();
+      const uriParts = uri.split('.');
+      const fileType = uriParts[uriParts.length - 1];
+      
+      const audioFile = {
+        uri,
+        name: `recording.${fileType}`,
+        type: `audio/${fileType}`
+      } as any;
+      
+      formData.append('audio', audioFile);
+
+      const response = await fetch('https://toolkit.rork.com/stt/transcribe/', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('Mobile transcription result:', data);
+      
+      if (data.text) {
+        setSearchQuery(data.text);
+      } else {
+        setError({ message: 'Could not transcribe audio. Please try again.', visible: true });
+      }
+    } catch (error) {
+      console.error('Mobile transcription failed:', error);
       setError({ message: 'Failed to transcribe audio. Please try again.', visible: true });
     }
   };
@@ -232,7 +323,17 @@ export function AISearchBar() {
   useEffect(() => {
     return () => {
       if (recordingState.recording) {
-        recordingState.recording.stopAndUnloadAsync();
+        if (Platform.OS === 'web') {
+          const { mediaRecorder, stream } = recordingState.recording as any;
+          if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+          }
+          if (stream) {
+            stream.getTracks().forEach((track: any) => track.stop());
+          }
+        } else {
+          recordingState.recording.stopAndUnloadAsync();
+        }
       }
     };
   }, [recordingState.recording]);
