@@ -140,10 +140,10 @@ export function AISearchBar() {
 
       if (Platform.OS === 'web') {
         // Web implementation using MediaRecorder
-        await startWebRecording();
+        await startWebRecording(false);
       } else {
         // Mobile implementation using expo-av
-        await startMobileRecording();
+        await startMobileRecording(false);
       }
     } catch (error) {
       console.error('Failed to start recording:', error);
@@ -151,7 +151,7 @@ export function AISearchBar() {
     }
   };
 
-  const startWebRecording = async () => {
+  const startWebRecording = async (isAutoMode: boolean = false) => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
@@ -162,6 +162,7 @@ export function AISearchBar() {
       let silenceStart: number | null = null;
       const SILENCE_THRESHOLD = 30; // Adjust this value to control sensitivity
       const SILENCE_DURATION = 2000; // 2 seconds of silence before auto-stop
+      let isStillRecording = true;
 
       // Set up audio analysis for silence detection
       try {
@@ -176,7 +177,7 @@ export function AISearchBar() {
       }
 
       const checkAudioLevel = () => {
-        if (!analyser || !dataArray) return;
+        if (!analyser || !dataArray || !isStillRecording) return;
         
         analyser.getByteFrequencyData(dataArray);
         const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
@@ -186,14 +187,17 @@ export function AISearchBar() {
             silenceStart = Date.now();
           } else if (Date.now() - silenceStart > SILENCE_DURATION) {
             console.log('Silence detected, stopping recording automatically');
-            stopRecording();
+            isStillRecording = false;
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+              mediaRecorder.stop();
+            }
             return;
           }
         } else {
           silenceStart = null;
         }
         
-        if (recordingState.isRecording) {
+        if (isStillRecording) {
           requestAnimationFrame(checkAudioLevel);
         }
       };
@@ -203,13 +207,14 @@ export function AISearchBar() {
       };
 
       mediaRecorder.onstop = async () => {
+        isStillRecording = false;
         if (audioContext) {
           audioContext.close();
         }
         const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-        await transcribeWebAudio(audioBlob, recordingState.isAutoListening);
+        await transcribeWebAudio(audioBlob, isAutoMode);
         stream.getTracks().forEach(track => track.stop());
-        setRecordingState(prev => ({ ...prev, isRecording: false, isProcessing: false, recording: null, silenceTimer: null }));
+        setRecordingState(prev => ({ ...prev, isRecording: false, isProcessing: false, recording: null, silenceTimer: null, isAutoListening: false }));
       };
 
       mediaRecorder.start();
@@ -217,23 +222,28 @@ export function AISearchBar() {
         isRecording: true, 
         isProcessing: false, 
         recording: { mediaRecorder, stream } as any,
-        isAutoListening: false,
+        isAutoListening: isAutoMode,
         silenceTimer: null
       });
       
       // Start silence detection if this is auto-listening
-      if (analyser && dataArray && recordingState.isAutoListening) {
-        requestAnimationFrame(checkAudioLevel);
+      if (analyser && dataArray && isAutoMode) {
+        // Wait a bit before starting silence detection to avoid immediate stops
+        setTimeout(() => {
+          if (isStillRecording) {
+            requestAnimationFrame(checkAudioLevel);
+          }
+        }, 1000);
       }
       
-      console.log('Web recording started');
+      console.log('Web recording started', isAutoMode ? '(auto mode)' : '(manual mode)');
     } catch (error) {
       console.error('Web recording failed:', error);
       throw error;
     }
   };
 
-  const startMobileRecording = async () => {
+  const startMobileRecording = async (isAutoMode: boolean = false) => {
     try {
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
@@ -269,21 +279,21 @@ export function AISearchBar() {
       let autoStopTimer: NodeJS.Timeout | null = null;
       
       // Set up auto-stop timer for mobile if this is auto-listening
-      if (recordingState.isAutoListening) {
+      if (isAutoMode) {
         autoStopTimer = setTimeout(() => {
-          console.log('Auto-stopping recording after 10 seconds');
+          console.log('Auto-stopping recording after 8 seconds');
           stopRecording();
-        }, 10000); // Auto-stop after 10 seconds
+        }, 8000); // Auto-stop after 8 seconds
       }
 
       setRecordingState({ 
         isRecording: true, 
         isProcessing: false, 
         recording,
-        isAutoListening: false,
+        isAutoListening: isAutoMode,
         silenceTimer: autoStopTimer
       });
-      console.log('Mobile recording started');
+      console.log('Mobile recording started', isAutoMode ? '(auto mode)' : '(manual mode)');
     } catch (error) {
       console.error('Mobile recording failed:', error);
       throw error;
@@ -309,6 +319,7 @@ export function AISearchBar() {
         }
       } else {
         // Mobile implementation
+        const wasAutoListening = recordingState.isAutoListening;
         await recordingState.recording.stopAndUnloadAsync();
         await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
 
@@ -316,7 +327,7 @@ export function AISearchBar() {
         console.log('Recording stopped, URI:', uri);
 
         if (uri) {
-          await transcribeMobileAudio(uri, recordingState.isAutoListening);
+          await transcribeMobileAudio(uri, wasAutoListening);
         }
         setRecordingState({ isRecording: false, isProcessing: false, recording: null, isAutoListening: false, silenceTimer: null });
       }
@@ -432,9 +443,9 @@ export function AISearchBar() {
       setRecordingState(prev => ({ ...prev, isAutoListening: true }));
 
       if (Platform.OS === 'web') {
-        await startWebRecording();
+        await startWebRecording(true);
       } else {
-        await startMobileRecording();
+        await startMobileRecording(true);
       }
     } catch (error) {
       console.error('Failed to start auto-listening:', error);
