@@ -29,7 +29,7 @@ interface RecordingState {
   isProcessing: boolean;
   recording: Audio.Recording | null;
   isAutoListening: boolean;
-  silenceTimer: NodeJS.Timeout | null;
+  silenceTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export function AISearchBar() {
@@ -179,8 +179,9 @@ export function AISearchBar() {
       const checkAudioLevel = () => {
         if (!analyser || !dataArray || !isStillRecording) return;
         
+        // @ts-expect-error - TypeScript strict mode issue with Web Audio API Uint8Array types
         analyser.getByteFrequencyData(dataArray);
-        const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
+        const average = Array.from(dataArray).reduce((sum, value) => sum + value, 0) / dataArray.length;
         
         if (average < SILENCE_THRESHOLD) {
           if (silenceStart === null) {
@@ -276,14 +277,14 @@ export function AISearchBar() {
         },
       });
 
-      let autoStopTimer: NodeJS.Timeout | null = null;
+      let autoStopTimer: ReturnType<typeof setTimeout> | null = null;
       
       // Set up auto-stop timer for mobile if this is auto-listening
       if (isAutoMode) {
         autoStopTimer = setTimeout(() => {
           console.log('Auto-stopping recording after 8 seconds');
           stopRecording();
-        }, 8000); // Auto-stop after 8 seconds
+        }, 8000) as ReturnType<typeof setTimeout>;
       }
 
       setRecordingState({ 
